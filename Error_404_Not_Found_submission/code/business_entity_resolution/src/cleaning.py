@@ -358,6 +358,11 @@ def clean_source_dataframe(df: pd.DataFrame, source_label: str = "") -> pd.DataF
 
     df = df.copy()
 
+    # Ensure all string columns are non-null strings to prevent AttributeError/TypeError
+    for col in ["business_name", "business_address", "country"]:
+        if col in df.columns:
+            df[col] = df[col].fillna("").astype(str)
+
     # Normalize names
     df["business_name_norm"] = df["business_name"].apply(normalize_business_name)
     df["business_name_core"] = df["business_name"].apply(normalize_business_name_core)
