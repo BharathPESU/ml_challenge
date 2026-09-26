@@ -62,7 +62,7 @@ def parse_s3_path(s3_path: str):
     return bucket, key
 
 
-def get_s3_client(unsigned: bool = False):
+def get_s3_client(unsigned: bool = False, region_name: Optional[str] = None):
     """
     Get a boto3 S3 client.
     
@@ -71,40 +71,55 @@ def get_s3_client(unsigned: bool = False):
     """
     if not HAS_BOTO3:
         raise RuntimeError("boto3 is not installed.")
+    
+    region = region_name or os.environ.get("AWS_REGION", "eu-north-1")
+    
     if unsigned:
-        return boto3.client("s3", config=BotoConfig(signature_version=UNSIGNED))
+        return boto3.client("s3", region_name=region, config=BotoConfig(signature_version=UNSIGNED))
     try:
-        return boto3.client("s3")
+        return boto3.client("s3", region_name=region)
     except Exception:
-        return boto3.client("s3", config=BotoConfig(signature_version=UNSIGNED))
+        return boto3.client("s3", region_name=region, config=BotoConfig(signature_version=UNSIGNED))
 
 
 def fetch_s3_object_body(bucket: str, key: str) -> bytes:
     """
     Fetch raw bytes of an object from S3.
     Tries authenticated boto3 client first, then unsigned boto3 client,
-    and falls back to standard HTTP GET for public S3 buckets.
+    and falls back to regional HTTP GET for public S3 buckets.
     """
-    if HAS_BOTO3:
-        try:
-            s3_client = get_s3_client(unsigned=False)
-            response = s3_client.get_object(Bucket=bucket, Key=key)
-            return response["Body"].read()
-        except Exception as e:
-            logger.info("Authenticated S3 fetch failed (%s). Trying unsigned boto3 client...", e)
-            try:
-                s3_client = get_s3_client(unsigned=True)
-                response = s3_client.get_object(Bucket=bucket, Key=key)
-                return response["Body"].read()
-            except Exception as e2:
-                logger.info("Unsigned boto3 fetch failed (%s). Falling back to HTTP fetch...", e2)
+    regions = [os.environ.get("AWS_REGION", "eu-north-1"), "eu-north-1", "us-east-1"]
 
-    # Fallback to direct HTTP request for public S3 bucket
-    url = f"https://s3.amazonaws.com/{bucket}/{key}"
-    logger.info("Fetching public S3 file via HTTP URL: %s", url)
-    req = urllib.request.Request(url, headers={"User-Agent": "BER-Pipeline/1.0"})
-    with urllib.request.urlopen(req) as resp:
-        return resp.read()
+    if HAS_BOTO3:
+        for r in regions:
+            for unsigned in [False, True]:
+                try:
+                    s3_client = get_s3_client(unsigned=unsigned, region_name=r)
+                    response = s3_client.get_object(Bucket=bucket, Key=key)
+                    return response["Body"].read()
+                except Exception as e:
+                    logger.debug("S3 fetch attempt failed (region=%s, unsigned=%s): %s", r, unsigned, e)
+        logger.info("Boto3 fetch attempts exhausted. Falling back to HTTP fetch...")
+
+    # Fallback to direct regional HTTP request for public S3 bucket
+    for r in ["eu-north-1", "us-east-1"]:
+        urls = [
+            f"https://{bucket}.s3.{r}.amazonaws.com/{key}",
+            f"https://s3.{r}.amazonaws.com/{bucket}/{key}",
+        ]
+        for url in urls:
+            try:
+                logger.info("Fetching public S3 file via HTTP URL: %s", url)
+                req = urllib.request.Request(url, headers={"User-Agent": "BER-Pipeline/1.0"})
+                with urllib.request.urlopen(req) as resp:
+                    return resp.read()
+            except Exception as e:
+                logger.debug("HTTP fetch failed for %s: %s", url, e)
+
+    raise RuntimeError(
+        f"Failed to fetch s3://{bucket}/{key}. Ensure the S3 bucket is public (Bucket Policy allows s3:GetObject) "
+        f"or your SageMaker IAM role has AmazonS3ReadOnlyAccess permissions."
+    )
 
 
 def ensure_local_dir(path: str) -> None:
