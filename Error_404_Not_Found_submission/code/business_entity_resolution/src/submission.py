@@ -20,7 +20,7 @@ import logging
 import os
 import subprocess
 import sys
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
