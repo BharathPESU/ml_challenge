@@ -103,7 +103,8 @@ def generate_test_candidates(
     test_s1_df: pd.DataFrame,
     test_s2_df: pd.DataFrame,
     test_s3_df: pd.DataFrame,
-    blocking_config: dict,
+    blocking_config: Optional[dict] = None,
+    config: Any = None,
 ) -> pd.DataFrame:
     """
     Generate the FINAL candidate set for test data.
@@ -119,8 +120,10 @@ def generate_test_candidates(
         Cleaned test Source 2.
     test_s3_df : pd.DataFrame
         Cleaned test Source 3.
-    blocking_config : dict
-        Blocking configuration (name_top_k, address_top_k, etc.).
+    blocking_config : dict, optional
+        Blocking configuration dictionary.
+    config : Config or Any, optional
+        Master configuration object.
 
     Returns
     -------
@@ -128,21 +131,16 @@ def generate_test_candidates(
         Candidate pairs with: source1_entity_id, candidate_entity_id, candidate_source.
     """
     logger.info("Generating test candidate pairs...")
+    cfg = config if config is not None else blocking_config
     candidates_df = generate_candidates(
         s1_df=test_s1_df,
         s2_df=test_s2_df,
         s3_df=test_s3_df,
-        name_top_k=blocking_config.get("name_top_k", 50),
-        address_top_k=blocking_config.get("address_top_k", 50),
-        min_name_similarity=blocking_config.get("min_name_similarity", 0.0),
-        min_address_similarity=blocking_config.get("min_address_similarity", 0.0),
-        tfidf_analyzer=blocking_config.get("tfidf_analyzer", "char"),
-        tfidf_ngram_range=tuple(blocking_config.get("tfidf_ngram_range", [2, 4])),
-        tfidf_min_df=blocking_config.get("tfidf_min_df", 1),
-        tfidf_sublinear_tf=blocking_config.get("tfidf_sublinear_tf", True),
-        use_token_blocking=blocking_config.get("use_token_blocking", True),
+        config=cfg,
     )
     logger.info("Test candidates generated: %d pairs", len(candidates_df))
+    return candidates_df
+
     return candidates_df
 
 

@@ -194,26 +194,22 @@ def generate_candidates(cfg: Config, state: PipelineState) -> None:
 
     logger.info("=== Stage 4: Candidate generation (blocking) ===")
 
-    bc = cfg.blocking
-    common_kwargs = dict(
-        s2_df=state.train_s2_clean,
-        s3_df=state.train_s3_clean,
-        name_top_k=bc.name_top_k,
-        address_top_k=bc.address_top_k,
-        min_name_similarity=bc.min_name_similarity,
-        min_address_similarity=bc.min_address_similarity,
-        tfidf_analyzer=bc.tfidf_analyzer,
-        tfidf_ngram_range=bc.tfidf_ngram_range,
-        tfidf_min_df=bc.tfidf_min_df,
-        tfidf_sublinear_tf=bc.tfidf_sublinear_tf,
-        tfidf_max_features=bc.tfidf_max_features,
-    )
-
     train_s1_df = filter_source_by_s1_ids(state.train_s1_clean, state.train_s1_ids)
     val_s1_df = filter_source_by_s1_ids(state.train_s1_clean, state.val_s1_ids)
 
-    state.train_candidates = _gen_cands(s1_df=train_s1_df, **common_kwargs)
-    state.val_candidates = _gen_cands(s1_df=val_s1_df, **common_kwargs)
+    state.train_candidates = _gen_cands(
+        s1_df=train_s1_df,
+        s2_df=state.train_s2_clean,
+        s3_df=state.train_s3_clean,
+        config=cfg,
+    )
+    state.val_candidates = _gen_cands(
+        s1_df=val_s1_df,
+        s2_df=state.train_s2_clean,
+        s3_df=state.train_s3_clean,
+        config=cfg,
+    )
+
 
 
 # ---------------------------------------------------------------------------

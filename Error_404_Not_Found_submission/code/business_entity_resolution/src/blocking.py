@@ -198,10 +198,12 @@ def generate_candidates(
     s1_df: pd.DataFrame,
     s2_df: pd.DataFrame,
     s3_df: pd.DataFrame,
-    config,
+    config=None,
     s1_id_set: Optional[Set[str]] = None,
+    **kwargs,
 ) -> pd.DataFrame:
     """Master multi-pass blocking function."""
+    from typing import Any
     
     if s1_id_set is not None:
         s1_df = s1_df[s1_df["entity_id"].isin(s1_id_set)].reset_index(drop=True)
@@ -209,31 +211,52 @@ def generate_candidates(
     logger.info("Generating candidates: %d S1 | %d S2 | %d S3", len(s1_df), len(s2_df), len(s3_df))
     all_frames = []
 
+    bcfg = None
+    if config is not None:
+        if hasattr(config, "blocking"):
+            bcfg = config.blocking
+        elif isinstance(config, dict):
+            bcfg = config
+    
+    if bcfg is None and "blocking_config" in kwargs:
+        bcfg = kwargs["blocking_config"]
+
+    def _get_val(key: str, default: Any) -> Any:
+        if bcfg is not None:
+            if hasattr(bcfg, key):
+                return getattr(bcfg, key)
+            elif isinstance(bcfg, dict) and key in bcfg:
+                return bcfg[key]
+        if key in kwargs:
+            return kwargs[key]
+        return default
+
+    pass1 = _get_val("pass1_exact_norm", True)
+    pass2 = _get_val("pass2_exact_core", True)
+    pass3 = _get_val("pass3_address_token", True)
+    pass4 = _get_val("pass4_numeric_address", True)
+    pass5 = _get_val("pass5_rare_name_token", True)
+    pass6 = _get_val("pass6_rare_address_token", True)
+    pass7 = _get_val("pass7_fuzz_name", True)
+    pass8 = _get_val("pass8_fuzz_address", True)
+    rare_threshold = _get_val("rare_token_threshold", 1000)
+
     for target_df, source_label in [(s2_df, "S2"), (s3_df, "S3")]:
-        bcfg = config.blocking
-        
-        if bcfg.pass1_exact_norm:
+        if pass1:
             all_frames.append(generate_exact_match_candidates(s1_df, target_df, "business_name_norm", source_label, 2))
-        
-        if bcfg.pass2_exact_core:
+        if pass2:
             all_frames.append(generate_exact_match_candidates(s1_df, target_df, "business_name_core", source_label, 3))
-            
-        if bcfg.pass3_address_token:
+        if pass3:
             all_frames.append(generate_exact_match_candidates(s1_df, target_df, "business_address_norm", source_label, 5))
-            
-        if bcfg.pass4_numeric_address:
+        if pass4:
             all_frames.append(generate_numeric_address_candidates(s1_df, target_df, source_label))
-            
-        if bcfg.pass5_rare_name_token:
-            all_frames.append(generate_rare_token_candidates(s1_df, target_df, "business_name_norm", source_label, bcfg.rare_token_threshold))
-            
-        if bcfg.pass6_rare_address_token:
-            all_frames.append(generate_rare_token_candidates(s1_df, target_df, "business_address_norm", source_label, bcfg.rare_token_threshold))
-            
-        if bcfg.pass7_fuzz_name:
+        if pass5:
+            all_frames.append(generate_rare_token_candidates(s1_df, target_df, "business_name_norm", source_label, rare_threshold))
+        if pass6:
+            all_frames.append(generate_rare_token_candidates(s1_df, target_df, "business_address_norm", source_label, rare_threshold))
+        if pass7:
             all_frames.append(generate_fuzzy_candidates(s1_df, target_df, "business_name_norm", source_label, limit=10))
-            
-        if bcfg.pass8_fuzz_address:
+        if pass8:
             all_frames.append(generate_fuzzy_candidates(s1_df, target_df, "business_address_norm", source_label, limit=10))
 
     if not all_frames:
@@ -245,3 +268,4 @@ def generate_candidates(
 
     logger.info("Blocking complete: %d unique candidate pairs for %d S1 entities.", len(combined), combined["source1_entity_id"].nunique())
     return combined
+
