@@ -156,7 +156,7 @@ def train_xgboost_local(
     evals = [(dtrain, "train"), (dval, "validation")]
 
     logger.info(
-        "Starting local XGBoost training: %d train pairs, %d val pairs, %d rounds",
+        "Starting local/Kaggle XGBoost training on GPU: %d train pairs, %d val pairs, %d rounds",
         len(X_train), len(X_val), num_round,
     )
     booster = xgb.train(
@@ -466,6 +466,8 @@ def save_experiment_config(
 BASELINE_XGBOOST_PARAMS: Dict[str, Any] = {
     "objective":        "binary:logistic",
     "eval_metric":      "aucpr",
+    "tree_method":      "hist",
+    "device":           "cuda:0",
     "max_depth":        6,
     "eta":              0.05,
     "min_child_weight": 3,

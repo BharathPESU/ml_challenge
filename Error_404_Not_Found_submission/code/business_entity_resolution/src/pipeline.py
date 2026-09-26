@@ -598,9 +598,12 @@ def run_full_pipeline(cfg: Optional[Config] = None) -> PipelineState:
         ("create_submission_files",    create_submission_files),
     ]
 
+    import gc
+
     for stage_name, stage_fn in stages:
         logger.info("Running stage: %s", stage_name)
         stage_fn(cfg, state)
+        gc.collect()
 
     logger.info("Pipeline complete.")
     return state

@@ -457,11 +457,13 @@ def extract_features(
     features_df = pd.DataFrame(feature_rows)
     metadata_df = pd.DataFrame(meta_rows)
 
-    # Ensure deterministic feature column order (alphabetical)
     features_df = features_df[sorted(features_df.columns)].reset_index(drop=True)
     metadata_df = metadata_df.reset_index(drop=True)
+    
+    # Apply float32/float16 downcasting for GPU efficiency without losing stability
+    features_df = features_df.astype(np.float32)
 
-    logger.info("Feature extraction complete: %d rows × %d features", len(features_df), len(features_df.columns))
+    logger.info("Feature extraction complete: %d rows × %d features (float32)", len(features_df), len(features_df.columns))
     return features_df, metadata_df
 
 

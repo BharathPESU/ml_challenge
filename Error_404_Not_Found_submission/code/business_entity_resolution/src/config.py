@@ -23,20 +23,38 @@ logger = logging.getLogger(__name__)
 # AWS / S3 Configuration
 # ---------------------------------------------------------------------------
 
+import glob
+
+def _detect_kaggle_path() -> Optional[str]:
+    """Auto-detect dataset directory on Kaggle."""
+    base = "/kaggle/input"
+    if os.path.exists(base):
+        # Look for the innermost dataset folder containing train/test
+        matches = glob.glob(f"{base}/**/dataset/train", recursive=True)
+        if matches:
+            return os.path.dirname(matches[0])  # Return the 'dataset' directory
+    return None
+
 def _get_default_data_path(subpath: str) -> str:
     """
-    Return local path if it exists locally, otherwise return public S3 URI.
-    Can be explicitly controlled via USE_S3_DATA=true environment variable.
+    Return local path if it exists locally, otherwise auto-detect Kaggle path, 
+    otherwise return public S3 URI.
     """
+    use_s3 = os.environ.get("USE_S3_DATA", "false").lower() == "true"
+    local_path = os.path.join("dataset", subpath)
+    
+    if os.path.exists(local_path) and not use_s3:
+        return local_path
+        
+    kaggle_base = _detect_kaggle_path()
+    if kaggle_base and not use_s3:
+        return os.path.join(kaggle_base, subpath)
+
     s3_base = os.environ.get(
         "S3_DATASET_BASE",
         "s3://ml-challenge-bharath/ml_challenge/Error_404_Not_Found_submission/dataset"
     )
-    local_path = os.path.join("dataset", subpath)
-    use_s3 = os.environ.get("USE_S3_DATA", "false").lower() == "true"
-    if use_s3 or not os.path.exists(local_path):
-        return f"{s3_base}/{subpath}"
-    return local_path
+    return f"{s3_base}/{subpath}"
 
 
 @dataclass
@@ -141,6 +159,10 @@ class ExperimentConfig:
     experiment_id: str = field(
         default_factory=lambda: os.environ.get("EXPERIMENT_ID", "exp_001")
     )
+    config_hash: Optional[str] = None
+    feature_version: str = "v1"
+    blocking_version: str = "v1"
+    model_version: str = "v1"
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +172,19 @@ class ExperimentConfig:
 @dataclass
 class BlockingConfig:
     """Configuration for candidate blocking / retrieval stage."""
-    # TF-IDF vectorizer settings
+    # 8-Pass Blocking Toggles
+    pass1_exact_norm: bool = True
+    pass2_exact_core: bool = True
+    pass3_address_token: bool = True
+    pass4_numeric_address: bool = True
+    pass5_rare_name_token: bool = True
+    pass6_rare_address_token: bool = True
+    pass7_fuzz_name: bool = True
+    pass8_fuzz_address: bool = True
+
+    rare_token_threshold: int = 1000
+
+    # TF-IDF vectorizer settings (legacy/fallback if needed)
     tfidf_analyzer: str = "char"
     tfidf_ngram_range: Tuple[int, int] = (2, 4)
     tfidf_min_df: int = 1
@@ -173,6 +207,27 @@ class BlockingConfig:
     min_name_similarity: float = 0.0
     min_address_similarity: float = 0.0
 
+
+# ---------------------------------------------------------------------------
+# Feature & Memory Configuration
+# ---------------------------------------------------------------------------
+
+@dataclass
+class FeatureConfig:
+    """Toggle list for feature extraction and memory optimization."""
+    use_char_features: bool = True
+    use_token_features: bool = True
+    use_numeric_features: bool = True
+    use_interaction_features: bool = True
+    use_float32: bool = True
+    use_float16: bool = False  # Caution: evaluate stability before enabling
+
+@dataclass
+class MemoryConfig:
+    """Settings for RAM and memory optimization."""
+    chunk_size: int = 50000
+    use_parquet_cache: bool = True
+    cache_dir: str = "/kaggle/working/run"
 
 # ---------------------------------------------------------------------------
 # Negative Sampling Configuration
@@ -199,6 +254,10 @@ class XGBoostConfig:
     """Baseline XGBoost hyperparameters — treated as starting point only."""
     objective: str = "binary:logistic"
     eval_metric: str = "aucpr"
+    
+    # GPU / Tree method defaults
+    tree_method: str = "hist"
+    device: str = "cuda:0"
 
     max_depth: int = 6
     eta: float = 0.05
@@ -288,6 +347,8 @@ class Config:
     data: DataPathConfig = field(default_factory=DataPathConfig)
     experiment: ExperimentConfig = field(default_factory=ExperimentConfig)
     blocking: BlockingConfig = field(default_factory=BlockingConfig)
+    features: FeatureConfig = field(default_factory=FeatureConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
     negative_sampling: NegativeSamplingConfig = field(default_factory=NegativeSamplingConfig)
     xgboost: XGBoostConfig = field(default_factory=XGBoostConfig)
     threshold: ThresholdConfig = field(default_factory=ThresholdConfig)

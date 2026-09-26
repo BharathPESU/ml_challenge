@@ -215,6 +215,11 @@ def build_training_pairs(
     positives = labelled_train[labelled_train["is_match"] == 1]
     n_pos = len(positives)
 
+    total_true_pairs = sum(len(v) for k, v in gt.items() if k in train_id_set)
+    capture_rate = (n_pos / total_true_pairs) * 100 if total_true_pairs > 0 else 0
+    
+    logger.info("Positive-pair capture rate before sampling: %d/%d (%.2f%%)", n_pos, total_true_pairs, capture_rate)
+
     if n_pos == 0:
         logger.warning("No positive pairs found in training candidate set!")
         return labelled_train

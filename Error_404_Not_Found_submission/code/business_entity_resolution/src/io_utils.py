@@ -204,10 +204,15 @@ def read_tsv(path: str, nrows: Optional[int] = None) -> pd.DataFrame:
 def _sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
     Replace any NaN values with empty strings and strip column names.
+    Downcast 'country' to categorical to save memory.
     """
     df.columns = [c.strip() for c in df.columns]
     for col in df.columns:
         df[col] = df[col].fillna("").astype(str)
+        
+    if "country" in df.columns:
+        df["country"] = df["country"].astype("category")
+    
     return df
 
 
@@ -244,6 +249,24 @@ def write_tsv(df: pd.DataFrame, path: str) -> None:
         with open(path, "w", encoding="utf-8") as f:
             f.write(tsv_content)
         logger.info("Successfully wrote %d rows to: %s", len(df), path)
+
+# ---------------------------------------------------------------------------
+# Parquet Caching (Memory Optimization)
+# ---------------------------------------------------------------------------
+
+def save_intermediate_parquet(df: pd.DataFrame, path: str) -> None:
+    """Save DataFrame to compressed Parquet format for fast, memory-efficient reloading."""
+    ensure_local_dir(path)
+    # Convert any categoricals back to string if necessary, or just save
+    df.to_parquet(path, engine="pyarrow", compression="snappy")
+    logger.debug("Saved intermediate parquet: %s", path)
+
+def load_intermediate_parquet(path: str) -> pd.DataFrame:
+    """Load intermediate DataFrame from Parquet."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Parquet file not found: {path}")
+    logger.debug("Loading intermediate parquet: %s", path)
+    return pd.read_parquet(path, engine="pyarrow")
 
 
 # ---------------------------------------------------------------------------
