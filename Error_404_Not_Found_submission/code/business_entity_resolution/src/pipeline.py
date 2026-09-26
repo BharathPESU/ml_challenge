@@ -146,6 +146,7 @@ def clean_training_data(cfg: Config, state: PipelineState) -> None:
     from cleaning import clean_source_dataframe
 
     logger.info("=== Stage 2: Cleaning training data ===")
+    assert state.train_s1 is not None and state.train_s2 is not None and state.train_s3 is not None, "Run Stage 1 first!"
 
     state.train_s1_clean = clean_source_dataframe(state.train_s1, "train_S1")
     state.train_s2_clean = clean_source_dataframe(state.train_s2, "train_S2")
@@ -164,6 +165,7 @@ def split_training_validation(cfg: Config, state: PipelineState) -> None:
     from splitting import prepare_train_val_split
 
     logger.info("=== Stage 3: Train/Validation split ===")
+    assert state.train_s1_clean is not None and state.gt is not None, "Run Stages 1 & 2 first!"
 
     (
         state.train_s1_ids,
@@ -193,6 +195,8 @@ def generate_candidates(cfg: Config, state: PipelineState) -> None:
     from splitting import filter_source_by_s1_ids
 
     logger.info("=== Stage 4: Candidate generation (blocking) ===")
+    assert state.train_s1_clean is not None and state.train_s2_clean is not None and state.train_s3_clean is not None, "Run Stage 2 first!"
+    assert state.train_s1_ids is not None and state.val_s1_ids is not None, "Run Stage 3 first!"
 
     train_s1_df = filter_source_by_s1_ids(state.train_s1_clean, state.train_s1_ids)
     val_s1_df = filter_source_by_s1_ids(state.train_s1_clean, state.val_s1_ids)
@@ -211,7 +215,6 @@ def generate_candidates(cfg: Config, state: PipelineState) -> None:
     )
 
 
-
 # ---------------------------------------------------------------------------
 # Stage 5: Evaluate candidate recall
 # ---------------------------------------------------------------------------
@@ -223,12 +226,16 @@ def evaluate_candidate_recall(cfg: Config, state: PipelineState) -> None:
     from evaluation import candidate_recall
 
     logger.info("=== Stage 5: Candidate recall evaluation ===")
+    assert state.train_candidates is not None and state.val_candidates is not None, "Run Stage 4 first!"
+    assert state.train_gt is not None and state.val_gt is not None, "Run Stage 3 first!"
+    assert state.train_s1_ids is not None and state.val_s1_ids is not None, "Run Stage 3 first!"
 
     train_recall = candidate_recall(state.train_candidates, state.train_gt, state.train_s1_ids)
     val_recall = candidate_recall(state.val_candidates, state.val_gt, state.val_s1_ids)
 
     logger.info("Train blocking recall: %s", train_recall)
     logger.info("Val blocking recall: %s", val_recall)
+
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +250,10 @@ def build_training_pairs(cfg: Config, state: PipelineState) -> None:
     from splitting import filter_source_by_s1_ids
 
     logger.info("=== Stage 6: Building training and validation pairs ===")
+    assert state.train_s1_clean is not None and state.train_s2_clean is not None and state.train_s3_clean is not None, "Run Stage 2 first!"
+    assert state.train_candidates is not None and state.val_candidates is not None, "Run Stage 4 first!"
+    assert state.train_gt is not None and state.val_gt is not None, "Run Stage 3 first!"
+    assert state.train_s1_ids is not None and state.val_s1_ids is not None, "Run Stage 3 first!"
 
     ns = cfg.negative_sampling
     combined_target = pd.concat([state.train_s2_clean, state.train_s3_clean], ignore_index=True)
@@ -278,6 +289,8 @@ def build_features(cfg: Config, state: PipelineState) -> None:
     from features import extract_features, build_entity_lookup, get_feature_column_names
 
     logger.info("=== Stage 7: Feature extraction ===")
+    assert state.train_s1_clean is not None and state.train_s2_clean is not None and state.train_s3_clean is not None, "Run Stage 2 first!"
+    assert state.train_pairs is not None and state.val_pairs is not None, "Run Stage 6 first!"
 
     entity_lookup = build_entity_lookup(
         state.train_s1_clean, state.train_s2_clean, state.train_s3_clean
@@ -305,11 +318,10 @@ def train_xgboost(cfg: Config, state: PipelineState) -> None:
     from training import train_xgboost_local, get_feature_matrix, get_labels, BASELINE_XGBOOST_PARAMS, save_experiment_config
 
     logger.info("=== Stage 8: XGBoost training ===")
+    assert state.train_features is not None and state.val_features is not None, "Run Stage 7 first!"
+    assert state.train_pairs is not None and state.val_pairs is not None, "Run Stage 6 first!"
+    assert state.feature_columns is not None, "Run Stage 7 first!"
 
-    X_train = get_feature_matrix(state.train_features, state.feature_columns)
-    y_train = get_labels(state.train_metadata if "is_match" in state.train_metadata.columns else state.train_features)
-
-    # Merge metadata is_match into features_df for get_labels to work
     train_merged = state.train_features.copy()
     if "is_match" in state.train_pairs.columns:
         train_merged["is_match"] = state.train_pairs["is_match"].values
@@ -361,6 +373,8 @@ def score_validation(cfg: Config, state: PipelineState) -> None:
     from training import predict_probabilities
 
     logger.info("=== Stage 9: Scoring validation candidates ===")
+    assert state.booster is not None, "Run Stage 8 first!"
+    assert state.val_features is not None and state.feature_columns is not None, "Run Stage 7 first!"
 
     state.val_probabilities = predict_probabilities(
         state.booster, state.val_features, state.feature_columns
@@ -378,6 +392,8 @@ def optimize_threshold(cfg: Config, state: PipelineState) -> None:
     from threshold import sweep_thresholds, select_best_threshold, save_threshold
 
     logger.info("=== Stage 10: Threshold optimization ===")
+    assert state.val_pairs is not None and state.val_probabilities is not None, "Run Stages 6 & 9 first!"
+    assert state.val_gt is not None and state.val_s1_ids is not None, "Run Stage 3 first!"
 
     tc = cfg.threshold
     state.sweep_df = sweep_thresholds(
@@ -408,6 +424,8 @@ def perform_error_analysis(cfg: Config, state: PipelineState) -> None:
     from threshold import analyze_errors
 
     logger.info("=== Stage 11: Error analysis ===")
+    assert state.val_pairs is not None and state.val_probabilities is not None, "Run Stages 6 & 9 first!"
+    assert state.val_gt is not None and state.best_threshold is not None and state.val_s1_ids is not None, "Run Stages 3 & 10 first!"
 
     errors = analyze_errors(
         val_pairs_df=state.val_pairs,
@@ -472,6 +490,8 @@ def build_test_features(cfg: Config, state: PipelineState) -> None:
     from inference import extract_test_features
 
     logger.info("=== Stage 13: Extracting test features ===")
+    assert state.test_candidates is not None, "Run Stage 12 first!"
+    assert state.test_s1_clean is not None and state.test_s2_clean is not None and state.test_s3_clean is not None, "Run Stage 12 first!"
 
     state.test_features, state.test_metadata = extract_test_features(
         test_candidates_df=state.test_candidates,
@@ -492,6 +512,9 @@ def run_test_inference(cfg: Config, state: PipelineState) -> None:
     from inference import run_inference
 
     logger.info("=== Stage 14: Test inference ===")
+    assert state.test_s1_clean is not None and state.test_s2_clean is not None and state.test_s3_clean is not None, "Run Stage 12 first!"
+    assert state.test_candidates is not None and state.test_features is not None and state.test_metadata is not None, "Run Stages 12 & 13 first!"
+    assert state.model_path is not None and state.threshold_path is not None and state.feature_columns is not None, "Run Stages 8 & 10 first!"
 
     state.test_predictions, _ = run_inference(
         test_s1_df=state.test_s1_clean,
@@ -518,6 +541,8 @@ def create_submission_files(cfg: Config, state: PipelineState) -> None:
     from submission import generate_submission_files
 
     logger.info("=== Stage 15: Generating submission files ===")
+    assert state.test_predictions is not None, "Run Stage 14 first!"
+    assert state.test_candidates is not None and state.test_s2_clean is not None and state.test_s3_clean is not None and state.test_s1_clean is not None, "Run Stage 12 first!"
 
     all_test_s1_ids = list(state.test_s1_clean["entity_id"])
 
@@ -533,6 +558,7 @@ def create_submission_files(cfg: Config, state: PipelineState) -> None:
     )
 
     logger.info("Submission files: %s | %s | Validator: %s", matching_path, candidates_path, "PASS" if passed else "FAIL")
+
 
 
 # ---------------------------------------------------------------------------
