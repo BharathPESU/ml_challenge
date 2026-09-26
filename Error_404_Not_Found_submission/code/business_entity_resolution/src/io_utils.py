@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import List, Optional
 import urllib.request
 
+import pandas as pd
+
 try:
     import boto3
     from botocore import UNSIGNED
