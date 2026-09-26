@@ -25,7 +25,7 @@ DEPENDENCIES:
 
 import logging
 import re
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
 import numpy as np
 import pandas as pd
@@ -292,7 +292,7 @@ class TFIDFSimilarityComputer:
         max_features: Optional[int] = None,
     ):
         self._char_vec = TfidfVectorizer(
-            analyzer=analyzer,
+            analyzer=cast(Any, analyzer),
             ngram_range=ngram_range,
             min_df=min_df,
             sublinear_tf=sublinear_tf,
@@ -317,14 +317,17 @@ class TFIDFSimilarityComputer:
         assert self._fitted, "Call fit() first."
         a = self._char_vec.transform([t or " " for t in texts_a])
         b = self._char_vec.transform([t or " " for t in texts_b])
-        return np.array([cosine_similarity(a[i], b[i])[0, 0] for i in range(a.shape[0])])
+        a_csr, b_csr = cast(Any, a), cast(Any, b)
+        return np.array([cosine_similarity(a_csr[i], b_csr[i])[0, 0] for i in range(a.shape[0])])
 
     def cosine_similarity_word(self, texts_a: List[str], texts_b: List[str]) -> np.ndarray:
         """Compute diagonal cosine similarities between paired texts (word n-gram)."""
         assert self._fitted, "Call fit() first."
         a = self._word_vec.transform([t or " " for t in texts_a])
         b = self._word_vec.transform([t or " " for t in texts_b])
-        return np.array([cosine_similarity(a[i], b[i])[0, 0] for i in range(a.shape[0])])
+        a_csr, b_csr = cast(Any, a), cast(Any, b)
+        return np.array([cosine_similarity(a_csr[i], b_csr[i])[0, 0] for i in range(a.shape[0])])
+
 
 
 # ---------------------------------------------------------------------------
@@ -367,10 +370,7 @@ def extract_features(
     meta_rows: List[dict] = []
 
     # Pre-extract TF-IDF scores if computers are provided
-    use_name_tfidf = name_tfidf is not None and name_tfidf._fitted
-    use_addr_tfidf = address_tfidf is not None and address_tfidf._fitted
-
-    if use_name_tfidf:
+    if name_tfidf is not None and name_tfidf._fitted:
         s1_names = [
             _safe_str(entity_lookup.get(r["source1_entity_id"], {}).get("business_name_norm", ""))
             for _, r in pairs_df.iterrows()
@@ -385,7 +385,7 @@ def extract_features(
         name_char_sims = np.zeros(len(pairs_df))
         name_word_sims = np.zeros(len(pairs_df))
 
-    if use_addr_tfidf:
+    if address_tfidf is not None and address_tfidf._fitted:
         s1_addrs = [
             _safe_str(entity_lookup.get(r["source1_entity_id"], {}).get("business_address_norm", ""))
             for _, r in pairs_df.iterrows()
@@ -487,9 +487,11 @@ def build_entity_lookup(
     """
     combined = pd.concat([s1_df, s2_df, s3_df], ignore_index=True)
     combined = combined.drop_duplicates(subset=["entity_id"])
-    lookup = combined.set_index("entity_id").to_dict("index")
+    lookup_raw = combined.set_index("entity_id").to_dict("index")
+    lookup: Dict[str, dict] = {str(k): v for k, v in lookup_raw.items()}
     logger.info("Entity lookup built: %d records.", len(lookup))
     return lookup
+
 
 
 def get_feature_column_names(features_df: pd.DataFrame) -> List[str]:
