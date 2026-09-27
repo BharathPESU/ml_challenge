@@ -319,17 +319,21 @@ def train_xgboost(cfg: Config, state: PipelineState) -> None:
     """
     from training import train_xgboost_local, get_feature_matrix, get_labels, BASELINE_XGBOOST_PARAMS, save_experiment_config
 
-    logger.info("=== Stage 8: XGBoost training ===")
+    if state.train_features is None and state.train_merged is not None:
+        state.train_features = state.train_merged
+    if state.val_features is None and state.val_merged is not None:
+        state.val_features = state.val_merged
+
     assert state.train_features is not None and state.val_features is not None, "Run Stage 7 first!"
     assert state.train_pairs is not None and state.val_pairs is not None, "Run Stage 6 first!"
     assert state.feature_columns is not None, "Run Stage 7 first!"
 
     train_merged = state.train_features.copy()
-    if "is_match" in state.train_pairs.columns:
+    if "is_match" in state.train_pairs.columns and "is_match" not in train_merged.columns:
         train_merged["is_match"] = state.train_pairs["is_match"].values
 
     val_merged = state.val_features.copy()
-    if "is_match" in state.val_pairs.columns:
+    if "is_match" in state.val_pairs.columns and "is_match" not in val_merged.columns:
         val_merged["is_match"] = state.val_pairs["is_match"].values
 
     X_train = get_feature_matrix(train_merged, state.feature_columns)
