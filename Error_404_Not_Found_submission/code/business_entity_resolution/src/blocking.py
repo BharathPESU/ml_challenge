@@ -354,18 +354,26 @@ def run_disk_backed_blocking(
             frames = []
             
             # Pass 1-4: Exact
-            frames.append(generate_exact_match_candidates(s1_chunk, tgt_df, "business_name_norm", tgt_label, 2, 500))
-            frames.append(generate_exact_match_candidates(s1_chunk, tgt_df, "business_name_core", tgt_label, 3, 500))
-            frames.append(generate_exact_match_candidates(s1_chunk, tgt_df, "business_address_norm", tgt_label, 5, 500))
-            frames.append(generate_numeric_address_candidates(s1_chunk, tgt_df, tgt_label))
+            if getattr(bcfg, "pass1_exact_norm", True):
+                frames.append(generate_exact_match_candidates(s1_chunk, tgt_df, "business_name_norm", tgt_label, 2, 500))
+            if getattr(bcfg, "pass2_exact_core", True):
+                frames.append(generate_exact_match_candidates(s1_chunk, tgt_df, "business_name_core", tgt_label, 3, 500))
+            if getattr(bcfg, "pass3_address_token", True):
+                frames.append(generate_exact_match_candidates(s1_chunk, tgt_df, "business_address_norm", tgt_label, 5, 500))
+            if getattr(bcfg, "pass4_numeric_address", True):
+                frames.append(generate_numeric_address_candidates(s1_chunk, tgt_df, tgt_label))
             
             # Pass 5-6: Rare
-            frames.append(generate_rare_token_candidates(s1_chunk, tgt_df, "business_name_norm", tgt_label, 1000))
-            frames.append(generate_rare_token_candidates(s1_chunk, tgt_df, "business_address_norm", tgt_label, 1000))
+            if getattr(bcfg, "pass5_rare_name_token", True):
+                frames.append(generate_rare_token_candidates(s1_chunk, tgt_df, "business_name_norm", tgt_label, 1000))
+            if getattr(bcfg, "pass6_rare_address_token", True):
+                frames.append(generate_rare_token_candidates(s1_chunk, tgt_df, "business_address_norm", tgt_label, 1000))
             
-            # Pass 7-8: Fuzzy
-            frames.append(generate_fuzzy_candidates(s1_chunk, tgt_df, "business_name_norm", tgt_label, 10))
-            frames.append(generate_fuzzy_candidates(s1_chunk, tgt_df, "business_address_norm", tgt_label, 10))
+            # Pass 7-8: Fuzzy (EXTREMELY SLOW - should be False by default)
+            if getattr(bcfg, "pass7_fuzz_name", False):
+                frames.append(generate_fuzzy_candidates(s1_chunk, tgt_df, "business_name_norm", tgt_label, 10))
+            if getattr(bcfg, "pass8_fuzz_address", False):
+                frames.append(generate_fuzzy_candidates(s1_chunk, tgt_df, "business_address_norm", tgt_label, 10))
             
             frames = [f for f in frames if not f.empty]
             if frames:

@@ -179,8 +179,8 @@ class BlockingConfig:
     pass4_numeric_address: bool = True
     pass5_rare_name_token: bool = True
     pass6_rare_address_token: bool = True
-    pass7_fuzz_name: bool = True
-    pass8_fuzz_address: bool = True
+    pass7_fuzz_name: bool = False
+    pass8_fuzz_address: bool = False
 
     rare_token_threshold: int = 1000
 
