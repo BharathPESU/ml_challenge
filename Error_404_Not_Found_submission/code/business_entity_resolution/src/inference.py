@@ -275,3 +275,46 @@ def run_inference(
         threshold,
     )
     return predictions, scored_df
+
+
+import pyarrow.parquet as pq
+import gc
+import time
+
+def extract_test_features_streaming(
+    test_candidates_path: str,
+    test_s1_df: pd.DataFrame,
+    test_s2_df: pd.DataFrame,
+    test_s3_df: pd.DataFrame,
+    output_dir: str,
+    chunk_size: int = 100000
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Extract features out-of-core to prevent OOM."""
+    logger.info("🦆 Extracting test features out-of-core...")
+    
+    pf = pq.ParquetFile(test_candidates_path)
+    n_total = pf.metadata.num_rows
+    n_chunks = math.ceil(n_total / chunk_size)
+    
+    feat_chunks = []
+    meta_chunks = []
+    
+    for i, batch in enumerate(pf.iter_batches(batch_size=chunk_size)):
+        t0 = time.time()
+        chunk_df = batch.to_pandas()
+        f_df, m_df = extract_test_features(chunk_df, test_s1_df, test_s2_df, test_s3_df)
+        
+        # Downcast floats
+        for col in f_df.select_dtypes(include=['float64']).columns:
+            f_df[col] = f_df[col].astype(np.float32)
+            
+        feat_chunks.append(f_df)
+        meta_chunks.append(m_df)
+        dt = time.time() - t0
+        logger.info(f"   ✅ Test Chunk {i+1}/{n_chunks} done in {dt:.1f}s")
+        del chunk_df, f_df, m_df
+        gc.collect()
+        
+    final_feats = pd.concat(feat_chunks, ignore_index=True)
+    final_meta = pd.concat(meta_chunks, ignore_index=True)
+    return final_feats, final_meta

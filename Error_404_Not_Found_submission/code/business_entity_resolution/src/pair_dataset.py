@@ -285,3 +285,123 @@ def build_validation_pairs(
         len(val_candidates), n_pos, n_neg,
     )
     return val_candidates
+
+
+import duckdb
+from memory_utils import report_memory
+
+def build_disk_backed_training_pairs(
+    candidates_parquet_path: str,
+    gt: Dict[str, Set[str]],
+    train_s1_ids: List[str],
+    s1_df: pd.DataFrame,
+    target_df: pd.DataFrame,
+    neg_ratio: int = 4,
+    hard_neg_fraction: float = 0.5,
+    random_seed: int = 42,
+) -> pd.DataFrame:
+    """
+    Construct the final training pair DataFrame using DuckDB out-of-core SQL.
+    """
+    logger.info("🦆 Building pairs via DuckDB out-of-core...")
+    
+    # 1. Build GT Dataframe
+    gt_rows = []
+    train_id_set = set(train_s1_ids)
+    for s1_id in train_s1_ids:
+        for cand_id in gt.get(s1_id, set()):
+            gt_rows.append({
+                "source1_entity_id": s1_id,
+                "candidate_entity_id": cand_id,
+                "is_match": 1
+            })
+    gt_df = pd.DataFrame(gt_rows)
+    if gt_df.empty:
+        gt_df = pd.DataFrame(columns=["source1_entity_id", "candidate_entity_id", "is_match"])
+        
+    n_pos = len(gt_df)
+    n_total_neg = n_pos * neg_ratio
+    n_hard = int(n_total_neg * hard_neg_fraction)
+    n_easy = n_total_neg - n_hard
+    
+    logger.info(f"Targets: {n_pos} pos, {n_easy} easy neg, {n_hard} hard neg")
+
+    duckdb.execute("PRAGMA temp_directory='/kaggle/working/duckdb_temp';")
+    duckdb.execute("PRAGMA memory_limit='15GB';")
+    
+    query = f"""
+    WITH candidates AS (
+        SELECT * FROM read_parquet('{candidates_parquet_path}')
+    ),
+    labelled AS (
+        SELECT c.source1_entity_id, c.candidate_entity_id, c.candidate_source,
+               COALESCE(g.is_match, 0) AS is_match
+        FROM candidates c
+        LEFT JOIN gt_df g ON c.source1_entity_id = g.source1_entity_id 
+                         AND c.candidate_entity_id = g.candidate_entity_id
+    ),
+    positives AS (
+        SELECT * FROM labelled WHERE is_match = 1
+    ),
+    negatives AS (
+        SELECT * FROM labelled WHERE is_match = 0
+    ),
+    easy_neg AS (
+        SELECT * FROM negatives ORDER BY random() LIMIT {n_easy}
+    ),
+    hard_pool AS (
+        SELECT n.* FROM negatives n
+        JOIN positives p ON n.source1_entity_id = p.source1_entity_id
+    ),
+    hard_neg AS (
+        SELECT * FROM hard_pool ORDER BY random() LIMIT {n_hard}
+    )
+    SELECT * FROM positives
+    UNION ALL
+    SELECT * FROM easy_neg
+    UNION ALL
+    SELECT * FROM hard_neg
+    """
+    
+    res = duckdb.query(query).df()
+    logger.info(f"✅ Final training pairs extracted to RAM: {len(res)} rows")
+    return res
+
+def build_disk_backed_validation_pairs(
+    candidates_parquet_path: str,
+    gt: Dict[str, Set[str]],
+    val_s1_ids: List[str]
+) -> pd.DataFrame:
+    """Validation pairs are not downsampled."""
+    
+    gt_rows = []
+    for s1_id in val_s1_ids:
+        for cand_id in gt.get(s1_id, set()):
+            gt_rows.append({
+                "source1_entity_id": s1_id,
+                "candidate_entity_id": cand_id,
+                "is_match": 1
+            })
+    gt_df = pd.DataFrame(gt_rows)
+    if gt_df.empty:
+        gt_df = pd.DataFrame(columns=["source1_entity_id", "candidate_entity_id", "is_match"])
+
+    duckdb.execute("PRAGMA temp_directory='/kaggle/working/duckdb_temp';")
+    duckdb.execute("PRAGMA memory_limit='15GB';")
+    
+    query = f"""
+    WITH candidates AS (
+        SELECT * FROM read_parquet('{candidates_parquet_path}')
+    ),
+    labelled AS (
+        SELECT c.source1_entity_id, c.candidate_entity_id, c.candidate_source,
+               COALESCE(g.is_match, 0) AS is_match
+        FROM candidates c
+        LEFT JOIN gt_df g ON c.source1_entity_id = g.source1_entity_id 
+                         AND c.candidate_entity_id = g.candidate_entity_id
+    )
+    SELECT * FROM labelled
+    """
+    res = duckdb.query(query).df()
+    logger.info(f"✅ Final validation pairs extracted to RAM: {len(res)} rows")
+    return res

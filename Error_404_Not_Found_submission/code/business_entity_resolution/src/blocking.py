@@ -226,7 +226,7 @@ def generate_fuzzy_candidates(
 # Master Entrypoint
 # ---------------------------------------------------------------------------
 
-def generate_candidates(
+def generate_candidates_deprecated(
     s1_df: pd.DataFrame,
     s2_df: pd.DataFrame,
     s3_df: pd.DataFrame,
@@ -298,3 +298,108 @@ def generate_candidates(
     res = res.drop_duplicates(subset=["source1_entity_id", "candidate_entity_id", "candidate_source"])
     logger.info("Total unique candidates generated: %d", len(res))
     return res
+
+
+import os
+import gc
+import time
+import math
+import duckdb
+from memory_utils import report_memory
+
+def run_disk_backed_blocking(
+    s1_df: pd.DataFrame,
+    s2_df: pd.DataFrame,
+    s3_df: pd.DataFrame,
+    output_dir: str,
+    prefix: str,
+    chunk_size: int = 10000,
+    config=None,
+    s1_id_set=None,
+) -> str:
+    """Runs multi-pass blocking out-of-core, chunking S1 to prevent OOM."""
+    
+    if s1_id_set is not None:
+        s1_df = s1_df[s1_df["entity_id"].isin(s1_id_set)].reset_index(drop=True)
+
+    final_output = os.path.join(output_dir, f"{prefix}_candidates.parquet")
+    if os.path.exists(final_output):
+        logger.info(f"⚡ [RESUME HIT] {final_output} exists. Skipping generation.")
+        return final_output
+
+    chunk_dir = os.path.join(output_dir, f"{prefix}_chunks")
+    os.makedirs(chunk_dir, exist_ok=True)
+    
+    # Read passes config
+    bcfg = config.blocking if config and hasattr(config, 'blocking') else config
+    
+    targets = [("S2", s2_df), ("S3", s3_df)]
+    n_chunks = math.ceil(len(s1_df) / chunk_size)
+    
+    logger.info(f"🚀 Starting Disk-Backed Blocking ({prefix}) | {n_chunks} chunks of {chunk_size} rows")
+    
+    for tgt_label, tgt_df in targets:
+        logger.info(f"   => Processing Target: {tgt_label}")
+        for chunk_idx in range(n_chunks):
+            chunk_file = os.path.join(chunk_dir, f"{tgt_label}_chunk_{chunk_idx}.parquet")
+            if os.path.exists(chunk_file):
+                logger.info(f"      ⏭️  Skipping completed chunk {chunk_idx}")
+                continue
+                
+            t0 = time.time()
+            start_i = chunk_idx * chunk_size
+            end_i = min((chunk_idx + 1) * chunk_size, len(s1_df))
+            s1_chunk = s1_df.iloc[start_i:end_i]
+            
+            frames = []
+            
+            # Pass 1-4: Exact
+            frames.append(generate_exact_match_candidates(s1_chunk, tgt_df, "business_name_norm", tgt_label, 2, 500))
+            frames.append(generate_exact_match_candidates(s1_chunk, tgt_df, "business_name_core", tgt_label, 3, 500))
+            frames.append(generate_exact_match_candidates(s1_chunk, tgt_df, "business_address_norm", tgt_label, 5, 500))
+            frames.append(generate_numeric_address_candidates(s1_chunk, tgt_df, tgt_label))
+            
+            # Pass 5-6: Rare
+            frames.append(generate_rare_token_candidates(s1_chunk, tgt_df, "business_name_norm", tgt_label, 1000))
+            frames.append(generate_rare_token_candidates(s1_chunk, tgt_df, "business_address_norm", tgt_label, 1000))
+            
+            # Pass 7-8: Fuzzy
+            frames.append(generate_fuzzy_candidates(s1_chunk, tgt_df, "business_name_norm", tgt_label, 10))
+            frames.append(generate_fuzzy_candidates(s1_chunk, tgt_df, "business_address_norm", tgt_label, 10))
+            
+            frames = [f for f in frames if not f.empty]
+            if frames:
+                chunk_res = pd.concat(frames, ignore_index=True)
+                chunk_res.drop_duplicates(inplace=True)
+                # Downcast to save RAM
+                chunk_res["source1_entity_id"] = chunk_res["source1_entity_id"].astype("string[pyarrow]")
+                chunk_res["candidate_entity_id"] = chunk_res["candidate_entity_id"].astype("string[pyarrow]")
+                chunk_res["candidate_source"] = chunk_res["candidate_source"].astype("category")
+                chunk_res.to_parquet(chunk_file, index=False)
+                c_len = len(chunk_res)
+            else:
+                c_len = 0
+                pd.DataFrame(columns=["source1_entity_id", "candidate_entity_id", "candidate_source"]).to_parquet(chunk_file, index=False)
+                
+            dt = time.time() - t0
+            logger.info(f"      ✅ Chunk {chunk_idx+1}/{n_chunks} ({tgt_label}) done in {dt:.1f}s — {c_len} candidates")
+            
+        report_memory(f"After {tgt_label}")
+        # Drop tgt_df if we can? We need it for both S1 chunks, but S2 is done now.
+        gc.collect()
+
+    logger.info("🦆 Running DuckDB Deduplication on Disk...")
+    os.makedirs("/kaggle/working/duckdb_temp", exist_ok=True)
+    duckdb.execute("PRAGMA temp_directory='/kaggle/working/duckdb_temp';")
+    duckdb.execute("PRAGMA memory_limit='15GB';")
+    
+    q = f"""
+    COPY (
+        SELECT DISTINCT source1_entity_id, candidate_entity_id, candidate_source
+        FROM read_parquet('{chunk_dir}/*.parquet')
+    ) TO '{final_output}' (FORMAT PARQUET);
+    """
+    duckdb.execute(q)
+    logger.info(f"✅ Saved deduplicated candidates to {final_output}")
+    
+    return final_output

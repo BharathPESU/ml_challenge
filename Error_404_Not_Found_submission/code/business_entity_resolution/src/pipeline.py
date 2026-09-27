@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class PipelineState:
-    """Holds shared state across pipeline stages."""
+    """Holds shared state across pipeline stages. LOW-RAM disk-backed version."""
 
     def __init__(self):
         # Raw data
@@ -65,21 +65,17 @@ class PipelineState:
         self.train_gt: Optional[Dict[str, Set[str]]] = None
         self.val_gt: Optional[Dict[str, Set[str]]] = None
 
-        # Candidates
-        self.train_candidates: Optional[pd.DataFrame] = None
-        self.val_candidates: Optional[pd.DataFrame] = None
+        # Candidates (Disk Paths)
+        self.train_candidates_path: Optional[str] = None
+        self.val_candidates_path: Optional[str] = None
 
-        # Labelled pairs
+        # Labelled pairs (Small enough for RAM)
         self.train_pairs: Optional[pd.DataFrame] = None
         self.val_pairs: Optional[pd.DataFrame] = None
 
         # Features
         self.train_features: Optional[pd.DataFrame] = None
-        self.train_metadata: Optional[pd.DataFrame] = None
         self.val_features: Optional[pd.DataFrame] = None
-        self.val_metadata: Optional[pd.DataFrame] = None
-        self.train_merged: Optional[pd.DataFrame] = None
-        self.val_merged: Optional[pd.DataFrame] = None
         self.feature_columns: Optional[List[str]] = None
 
         # Model
@@ -96,11 +92,9 @@ class PipelineState:
         self.test_s1_clean: Optional[pd.DataFrame] = None
         self.test_s2_clean: Optional[pd.DataFrame] = None
         self.test_s3_clean: Optional[pd.DataFrame] = None
-        self.test_candidates: Optional[pd.DataFrame] = None
+        self.test_candidates_path: Optional[str] = None
         self.test_features: Optional[pd.DataFrame] = None
         self.test_metadata: Optional[pd.DataFrame] = None
-
-        # Final predictions
         self.test_predictions: Optional[Dict[str, Set[str]]] = None
 
 
@@ -188,32 +182,29 @@ def split_training_validation(cfg: Config, state: PipelineState) -> None:
 # Stage 4: Generate candidates
 # ---------------------------------------------------------------------------
 
+
 def generate_candidates(cfg: Config, state: PipelineState) -> None:
-    """
-    Stage 4: Run multi-pass blocking to generate candidate pairs.
-    Run separately for train and validation S1 subsets.
-    """
-    from blocking import generate_candidates as _gen_cands
-    from splitting import filter_source_by_s1_ids
-
-    logger.info("=== Stage 4: Candidate generation (blocking) ===")
-    assert state.train_s1_clean is not None and state.train_s2_clean is not None and state.train_s3_clean is not None, "Run Stage 2 first!"
-    assert state.train_s1_ids is not None and state.val_s1_ids is not None, "Run Stage 3 first!"
-
-    train_s1_df = filter_source_by_s1_ids(state.train_s1_clean, state.train_s1_ids)
-    val_s1_df = filter_source_by_s1_ids(state.train_s1_clean, state.val_s1_ids)
-
-    state.train_candidates = _gen_cands(
-        s1_df=train_s1_df,
+    from blocking import run_disk_backed_blocking
+    logger.info("=== Stage 4: Disk-Backed Candidate Generation ===")
+    
+    state.train_candidates_path = run_disk_backed_blocking(
+        s1_df=state.train_s1_clean,
         s2_df=state.train_s2_clean,
         s3_df=state.train_s3_clean,
+        output_dir=cfg.data.output_dir,
+        prefix="train",
         config=cfg,
+        s1_id_set=set(state.train_s1_ids)
     )
-    state.val_candidates = _gen_cands(
-        s1_df=val_s1_df,
+    
+    state.val_candidates_path = run_disk_backed_blocking(
+        s1_df=state.train_s1_clean,
         s2_df=state.train_s2_clean,
         s3_df=state.train_s3_clean,
+        output_dir=cfg.data.output_dir,
+        prefix="val",
         config=cfg,
+        s1_id_set=set(state.val_s1_ids)
     )
 
 
@@ -244,38 +235,28 @@ def evaluate_candidate_recall(cfg: Config, state: PipelineState) -> None:
 # Stage 6: Build training pairs
 # ---------------------------------------------------------------------------
 
+
 def build_training_pairs(cfg: Config, state: PipelineState) -> None:
-    """
-    Stage 6: Label candidates and build balanced training / validation pair sets.
-    """
-    from pair_dataset import label_candidates, build_training_pairs as _build_pairs, build_validation_pairs
-    from splitting import filter_source_by_s1_ids
-
+    from pair_dataset import build_disk_backed_training_pairs, build_disk_backed_validation_pairs
     logger.info("=== Stage 6: Building training and validation pairs ===")
-    assert state.train_s1_clean is not None and state.train_s2_clean is not None and state.train_s3_clean is not None, "Run Stage 2 first!"
-    assert state.train_candidates is not None and state.val_candidates is not None, "Run Stage 4 first!"
-    assert state.train_gt is not None and state.val_gt is not None, "Run Stage 3 first!"
-    assert state.train_s1_ids is not None and state.val_s1_ids is not None, "Run Stage 3 first!"
-
+    
     ns = cfg.negative_sampling
     combined_target = pd.concat([state.train_s2_clean, state.train_s3_clean], ignore_index=True)
-    train_s1_df = filter_source_by_s1_ids(state.train_s1_clean, state.train_s1_ids)
-
-    labelled_train = label_candidates(state.train_candidates, state.train_gt)
-    state.train_pairs = _build_pairs(
-        labelled_df=labelled_train,
+    
+    state.train_pairs = build_disk_backed_training_pairs(
+        candidates_parquet_path=state.train_candidates_path,
         gt=state.train_gt,
         train_s1_ids=state.train_s1_ids,
-        s1_df=train_s1_df,
+        s1_df=state.train_s1_clean,
         target_df=combined_target,
         neg_ratio=ns.neg_ratio,
         hard_neg_fraction=ns.hard_neg_fraction,
         random_seed=cfg.experiment.random_seed,
     )
-
-    state.val_pairs = build_validation_pairs(
-        candidates_df=state.val_candidates,
-        val_gt=state.val_gt,
+    
+    state.val_pairs = build_disk_backed_validation_pairs(
+        candidates_parquet_path=state.val_candidates_path,
+        gt=state.val_gt,
         val_s1_ids=state.val_s1_ids,
     )
 
@@ -449,12 +430,10 @@ def perform_error_analysis(cfg: Config, state: PipelineState) -> None:
 # Stage 12: Generate test candidates
 # ---------------------------------------------------------------------------
 
-def generate_test_candidates(cfg: Config, state: PipelineState) -> None:
-    """
-    Stage 12: Run blocking on test data to generate final candidate set.
-    """
-    from inference import load_and_clean_test_data, generate_test_candidates as _gen_test_cands
 
+def generate_test_candidates(cfg: Config, state: PipelineState) -> None:
+    from inference import load_and_clean_test_data
+    from blocking import run_disk_backed_blocking
     logger.info("=== Stage 12: Generating test candidates ===")
 
     state.test_s1_clean, state.test_s2_clean, state.test_s3_clean = \
@@ -465,22 +444,13 @@ def generate_test_candidates(cfg: Config, state: PipelineState) -> None:
             debug_sample_size=cfg.runtime.debug_sample_size,
         )
 
-    bc = cfg.blocking
-    blocking_config = {
-        "name_top_k": bc.name_top_k,
-        "address_top_k": bc.address_top_k,
-        "min_name_similarity": bc.min_name_similarity,
-        "min_address_similarity": bc.min_address_similarity,
-        "tfidf_analyzer": bc.tfidf_analyzer,
-        "tfidf_ngram_range": list(bc.tfidf_ngram_range),
-        "tfidf_min_df": bc.tfidf_min_df,
-        "tfidf_sublinear_tf": bc.tfidf_sublinear_tf,
-        "use_token_blocking": True,
-    }
-
-    state.test_candidates = _gen_test_cands(
-        state.test_s1_clean, state.test_s2_clean, state.test_s3_clean,
-        blocking_config=blocking_config,
+    state.test_candidates_path = run_disk_backed_blocking(
+        s1_df=state.test_s1_clean,
+        s2_df=state.test_s2_clean,
+        s3_df=state.test_s3_clean,
+        output_dir=cfg.data.output_dir,
+        prefix="test",
+        config=cfg,
     )
 
 
@@ -488,22 +458,17 @@ def generate_test_candidates(cfg: Config, state: PipelineState) -> None:
 # Stage 13: Build test features
 # ---------------------------------------------------------------------------
 
+
 def build_test_features(cfg: Config, state: PipelineState) -> None:
-    """
-    Stage 13: Extract pairwise features for test candidate pairs.
-    Identical feature computation as training.
-    """
-    from inference import extract_test_features
+    from inference import extract_test_features_streaming
+    logger.info("=== Stage 13: Extracting test features (Disk-Backed) ===")
 
-    logger.info("=== Stage 13: Extracting test features ===")
-    assert state.test_candidates is not None, "Run Stage 12 first!"
-    assert state.test_s1_clean is not None and state.test_s2_clean is not None and state.test_s3_clean is not None, "Run Stage 12 first!"
-
-    state.test_features, state.test_metadata = extract_test_features(
-        test_candidates_df=state.test_candidates,
+    state.test_features, state.test_metadata = extract_test_features_streaming(
+        test_candidates_path=state.test_candidates_path,
         test_s1_df=state.test_s1_clean,
         test_s2_df=state.test_s2_clean,
         test_s3_df=state.test_s3_clean,
+        output_dir=cfg.data.output_dir
     )
 
 
@@ -526,7 +491,7 @@ def run_test_inference(cfg: Config, state: PipelineState) -> None:
         test_s1_df=state.test_s1_clean,
         test_s2_df=state.test_s2_clean,
         test_s3_df=state.test_s3_clean,
-        test_candidates_df=state.test_candidates,
+        test_candidates_df=pd.read_parquet(state.test_candidates_path),
         test_features_df=state.test_features,
         test_metadata_df=state.test_metadata,
         model_path=state.model_path,
@@ -555,7 +520,7 @@ def create_submission_files(cfg: Config, state: PipelineState) -> None:
     matching_path, candidates_path, passed = generate_submission_files(
         all_test_s1_ids=all_test_s1_ids,
         predictions=state.test_predictions,
-        candidates_df=state.test_candidates,
+        candidates_df=pd.read_parquet(state.test_candidates_path),
         test_s2_df=state.test_s2_clean,
         test_s3_df=state.test_s3_clean,
         output_dir=cfg.data.output_dir,
