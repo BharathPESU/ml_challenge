@@ -33,7 +33,8 @@ def generate_exact_match_candidates(
     target_df: pd.DataFrame,
     col_name: str,
     candidate_source: str,
-    min_len: int = 1
+    min_len: int = 1,
+    max_target_freq: int = 500
 ) -> pd.DataFrame:
     """Generic exact match generator using fast vectorized pd.merge."""
     logger.debug(f"[Exact Blocking] {col_name} against {candidate_source}")
@@ -47,6 +48,14 @@ def generate_exact_match_candidates(
     tgt_sub = tgt_sub[tgt_sub[col_name].astype(str).str.len() >= min_len]
 
     if s1_sub.empty or tgt_sub.empty:
+        return _empty_candidates()
+        
+    # 🛡️ Anti-Explosion Filter: Drop exact matches that are too common (e.g. "na", "unknown")
+    counts = tgt_sub[col_name].value_counts()
+    valid_keys = counts[counts <= max_target_freq].index
+    tgt_sub = tgt_sub[tgt_sub[col_name].isin(valid_keys)]
+    
+    if tgt_sub.empty:
         return _empty_candidates()
 
     merged = pd.merge(s1_sub, tgt_sub, on=col_name, suffixes=("_s1", "_cand"))
