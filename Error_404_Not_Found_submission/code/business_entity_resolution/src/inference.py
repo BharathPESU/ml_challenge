@@ -30,8 +30,14 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import numpy as np
 import pandas as pd
 
-from cleaning import clean_source_dataframe
-from blocking import generate_candidates
+try:
+    from blocking import generate_candidates
+except ImportError:
+    import sys, importlib
+    if 'blocking' in sys.modules:
+        import blocking
+        importlib.reload(blocking)
+    from blocking import generate_candidates
 from features import extract_features, build_entity_lookup, TFIDFSimilarityComputer
 from training import predict_probabilities, load_xgboost_model_local, get_feature_matrix
 from threshold import predictions_from_probabilities, load_threshold
