@@ -369,15 +369,18 @@ def extract_features(
     feature_rows: List[dict] = []
     meta_rows: List[dict] = []
 
+    s1_ids = pairs_df["source1_entity_id"].values
+    cand_ids = pairs_df["candidate_entity_id"].values
+
     # Pre-extract TF-IDF scores if computers are provided
     if name_tfidf is not None and name_tfidf._fitted:
         s1_names = [
-            _safe_str(entity_lookup.get(r["source1_entity_id"], {}).get("business_name_norm", ""))
-            for _, r in pairs_df.iterrows()
+            _safe_str(entity_lookup.get(sid, {}).get("business_name_norm", ""))
+            for sid in s1_ids
         ]
         cand_names = [
-            _safe_str(entity_lookup.get(r["candidate_entity_id"], {}).get("business_name_norm", ""))
-            for _, r in pairs_df.iterrows()
+            _safe_str(entity_lookup.get(cid, {}).get("business_name_norm", ""))
+            for cid in cand_ids
         ]
         name_char_sims = name_tfidf.cosine_similarity_char(s1_names, cand_names)
         name_word_sims = name_tfidf.cosine_similarity_word(s1_names, cand_names)
@@ -387,12 +390,12 @@ def extract_features(
 
     if address_tfidf is not None and address_tfidf._fitted:
         s1_addrs = [
-            _safe_str(entity_lookup.get(r["source1_entity_id"], {}).get("business_address_norm", ""))
-            for _, r in pairs_df.iterrows()
+            _safe_str(entity_lookup.get(sid, {}).get("business_address_norm", ""))
+            for sid in s1_ids
         ]
         cand_addrs = [
-            _safe_str(entity_lookup.get(r["candidate_entity_id"], {}).get("business_address_norm", ""))
-            for _, r in pairs_df.iterrows()
+            _safe_str(entity_lookup.get(cid, {}).get("business_address_norm", ""))
+            for cid in cand_ids
         ]
         addr_char_sims = address_tfidf.cosine_similarity_char(s1_addrs, cand_addrs)
         addr_word_sims = address_tfidf.cosine_similarity_word(s1_addrs, cand_addrs)
@@ -400,7 +403,8 @@ def extract_features(
         addr_char_sims = np.zeros(len(pairs_df))
         addr_word_sims = np.zeros(len(pairs_df))
 
-    for i, (_, row) in enumerate(pairs_df.iterrows()):
+    pairs_records = pairs_df.to_dict("records")
+    for i, row in enumerate(pairs_records):
         s1_id = row["source1_entity_id"]
         cand_id = row["candidate_entity_id"]
         cand_src = row.get("candidate_source", "")
@@ -450,7 +454,7 @@ def extract_features(
             "candidate_entity_id": cand_id,
             "candidate_source": cand_src,
         }
-        if "is_match" in row.index:
+        if "is_match" in row:
             meta["is_match"] = int(row["is_match"])
         meta_rows.append(meta)
 
