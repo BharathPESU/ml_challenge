@@ -411,3 +411,7 @@ def run_disk_backed_blocking(
     logger.info(f"✅ Saved deduplicated candidates to {final_output}")
     
     return final_output
+
+# Backward compatibility alias
+generate_candidates = generate_candidates_deprecated
+
