@@ -310,6 +310,11 @@ def train_xgboost(cfg: Config, state: PipelineState) -> None:
 
     assert state.train_features is not None and state.val_features is not None, "Run Stage 7 first!"
     assert state.train_pairs is not None and state.val_pairs is not None, "Run Stage 6 first!"
+
+    if state.feature_columns is None:
+        from features import get_feature_column_names
+        state.feature_columns = get_feature_column_names(state.train_features)
+
     assert state.feature_columns is not None, "Run Stage 7 first!"
 
     train_merged = state.train_features.copy()
@@ -364,7 +369,11 @@ def score_validation(cfg: Config, state: PipelineState) -> None:
 
     logger.info("=== Stage 9: Scoring validation candidates ===")
     assert state.booster is not None, "Run Stage 8 first!"
-    assert state.val_features is not None and state.feature_columns is not None, "Run Stage 7 first!"
+    assert state.val_features is not None, "Run Stage 7 first!"
+
+    if state.feature_columns is None:
+        from features import get_feature_column_names
+        state.feature_columns = get_feature_column_names(state.val_features)
 
     state.val_probabilities = predict_probabilities(
         state.booster, state.val_features, state.feature_columns
@@ -488,7 +497,11 @@ def run_test_inference(cfg: Config, state: PipelineState) -> None:
     logger.info("=== Stage 14: Test inference ===")
     assert state.test_s1_clean is not None and state.test_s2_clean is not None and state.test_s3_clean is not None, "Run Stage 12 first!"
     assert state.test_candidates_path is not None and state.test_features is not None and state.test_metadata is not None, "Run Stages 12 & 13 first!"
-    assert state.model_path is not None and state.threshold_path is not None and state.feature_columns is not None, "Run Stages 8 & 10 first!"
+    assert state.model_path is not None and state.threshold_path is not None, "Run Stages 8 & 10 first!"
+
+    if state.feature_columns is None and state.test_features is not None:
+        from features import get_feature_column_names
+        state.feature_columns = get_feature_column_names(state.test_features)
 
     state.test_predictions, _ = run_inference(
         test_s1_df=state.test_s1_clean,
