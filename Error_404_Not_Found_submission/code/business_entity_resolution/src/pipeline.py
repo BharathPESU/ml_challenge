@@ -303,10 +303,29 @@ def train_xgboost(cfg: Config, state: PipelineState) -> None:
     """
     from training import train_xgboost_local, get_feature_matrix, get_labels, BASELINE_XGBOOST_PARAMS, save_experiment_config
 
-    if state.train_features is None and state.train_merged is not None:
-        state.train_features = state.train_merged
-    if state.val_features is None and state.val_merged is not None:
-        state.val_features = state.val_merged
+    if state.train_features is None:
+        tf_path = os.path.join(cfg.data.output_dir, "train_features.parquet")
+        if os.path.exists(tf_path):
+            logger.info("⚡ [AUTO-LOAD] Loading train_features.parquet from disk...")
+            state.train_features = pd.read_parquet(tf_path)
+
+    if state.val_features is None:
+        vf_path = os.path.join(cfg.data.output_dir, "val_features.parquet")
+        if os.path.exists(vf_path):
+            logger.info("⚡ [AUTO-LOAD] Loading val_features.parquet from disk...")
+            state.val_features = pd.read_parquet(vf_path)
+
+    if state.train_pairs is None:
+        tp_path = os.path.join(cfg.data.output_dir, "train_pairs.parquet")
+        if os.path.exists(tp_path):
+            logger.info("⚡ [AUTO-LOAD] Loading train_pairs.parquet from disk...")
+            state.train_pairs = pd.read_parquet(tp_path)
+
+    if state.val_pairs is None:
+        vp_path = os.path.join(cfg.data.output_dir, "val_pairs.parquet")
+        if os.path.exists(vp_path):
+            logger.info("⚡ [AUTO-LOAD] Loading val_pairs.parquet from disk...")
+            state.val_pairs = pd.read_parquet(vp_path)
 
     assert state.train_features is not None and state.val_features is not None, "Run Stage 7 first!"
     assert state.train_pairs is not None and state.val_pairs is not None, "Run Stage 6 first!"
@@ -367,7 +386,12 @@ def score_validation(cfg: Config, state: PipelineState) -> None:
     """
     from training import predict_probabilities
 
-    logger.info("=== Stage 9: Scoring validation candidates ===")
+    if state.val_features is None:
+        vf_path = os.path.join(cfg.data.output_dir, "val_features.parquet")
+        if os.path.exists(vf_path):
+            logger.info("⚡ [AUTO-LOAD] Loading val_features.parquet from disk...")
+            state.val_features = pd.read_parquet(vf_path)
+
     assert state.booster is not None, "Run Stage 8 first!"
     assert state.val_features is not None, "Run Stage 7 first!"
 
