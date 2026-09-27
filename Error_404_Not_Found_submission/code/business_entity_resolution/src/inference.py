@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import numpy as np
 import pandas as pd
 
+from cleaning import clean_source_dataframe
 try:
     from blocking import generate_candidates
 except ImportError:
