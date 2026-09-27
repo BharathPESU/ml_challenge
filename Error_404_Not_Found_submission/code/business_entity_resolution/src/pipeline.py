@@ -78,6 +78,8 @@ class PipelineState:
         self.train_metadata: Optional[pd.DataFrame] = None
         self.val_features: Optional[pd.DataFrame] = None
         self.val_metadata: Optional[pd.DataFrame] = None
+        self.train_merged: Optional[pd.DataFrame] = None
+        self.val_merged: Optional[pd.DataFrame] = None
         self.feature_columns: Optional[List[str]] = None
 
         # Model
