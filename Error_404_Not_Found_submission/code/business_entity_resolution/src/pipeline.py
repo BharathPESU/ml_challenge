@@ -219,12 +219,15 @@ def evaluate_candidate_recall(cfg: Config, state: PipelineState) -> None:
     from evaluation import candidate_recall
 
     logger.info("=== Stage 5: Candidate recall evaluation ===")
-    assert state.train_candidates is not None and state.val_candidates is not None, "Run Stage 4 first!"
+    assert state.train_candidates_path is not None and state.val_candidates_path is not None, "Run Stage 4 first!"
     assert state.train_gt is not None and state.val_gt is not None, "Run Stage 3 first!"
     assert state.train_s1_ids is not None and state.val_s1_ids is not None, "Run Stage 3 first!"
 
-    train_recall = candidate_recall(state.train_candidates, state.train_gt, state.train_s1_ids)
-    val_recall = candidate_recall(state.val_candidates, state.val_gt, state.val_s1_ids)
+    train_cands = pd.read_parquet(state.train_candidates_path)
+    val_cands = pd.read_parquet(state.val_candidates_path)
+
+    train_recall = candidate_recall(train_cands, state.train_gt, state.train_s1_ids)
+    val_recall = candidate_recall(val_cands, state.val_gt, state.val_s1_ids)
 
     logger.info("Train blocking recall: %s", train_recall)
     logger.info("Val blocking recall: %s", val_recall)
@@ -484,7 +487,7 @@ def run_test_inference(cfg: Config, state: PipelineState) -> None:
 
     logger.info("=== Stage 14: Test inference ===")
     assert state.test_s1_clean is not None and state.test_s2_clean is not None and state.test_s3_clean is not None, "Run Stage 12 first!"
-    assert state.test_candidates is not None and state.test_features is not None and state.test_metadata is not None, "Run Stages 12 & 13 first!"
+    assert state.test_candidates_path is not None and state.test_features is not None and state.test_metadata is not None, "Run Stages 12 & 13 first!"
     assert state.model_path is not None and state.threshold_path is not None and state.feature_columns is not None, "Run Stages 8 & 10 first!"
 
     state.test_predictions, _ = run_inference(
@@ -513,7 +516,7 @@ def create_submission_files(cfg: Config, state: PipelineState) -> None:
 
     logger.info("=== Stage 15: Generating submission files ===")
     assert state.test_predictions is not None, "Run Stage 14 first!"
-    assert state.test_candidates is not None and state.test_s2_clean is not None and state.test_s3_clean is not None and state.test_s1_clean is not None, "Run Stage 12 first!"
+    assert state.test_candidates_path is not None and state.test_s2_clean is not None and state.test_s3_clean is not None and state.test_s1_clean is not None, "Run Stage 12 first!"
 
     all_test_s1_ids = list(state.test_s1_clean["entity_id"])
 
