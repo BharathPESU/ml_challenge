@@ -324,8 +324,7 @@ class RuntimeConfig:
     # Optional row limit for fast local debugging (None = full dataset)
     debug_sample_size: Optional[int] = field(
         default_factory=lambda: (
-            int(os.environ.get("DEBUG_SAMPLE_SIZE"))
-            if os.environ.get("DEBUG_SAMPLE_SIZE") else None
+            int(val) if (val := os.environ.get("DEBUG_SAMPLE_SIZE")) else None
         )
     )
 
