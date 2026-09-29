@@ -79,6 +79,7 @@ def load_and_clean_test_data(
         (test_s1_clean, test_s2_clean, test_s3_clean)
     """
     from io_utils import read_tsv, validate_source_file
+    from cleaning import clean_source_dataframe
 
     logger.info("Loading test data...")
     test_s1 = read_tsv(test_s1_path, nrows=debug_sample_size)

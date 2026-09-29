@@ -468,6 +468,10 @@ def perform_error_analysis(cfg: Config, state: PipelineState) -> None:
 
 
 def generate_test_candidates(cfg: Config, state: PipelineState) -> None:
+    import sys, importlib
+    if 'inference' in sys.modules:
+        import inference
+        importlib.reload(inference)
     from inference import load_and_clean_test_data
     from blocking import run_disk_backed_blocking
     logger.info("=== Stage 12: Generating test candidates ===")
